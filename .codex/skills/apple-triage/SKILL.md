@@ -27,6 +27,37 @@ apple-triage --json doctor --probe
 
 This may trigger macOS Automation permission prompts for Mail and Calendar. Ask the user to approve them in System Settings if the probe reports permission errors.
 
+## End-to-end smoke test
+
+When asked to test the CLI end to end, use this compact path and save outputs for validation:
+
+```sh
+./install.sh
+apple-triage --json doctor > /tmp/apple-triage-doctor.json
+apple-triage --json doctor --probe > /tmp/apple-triage-probe.json
+apple-triage --json calendar list > /tmp/apple-triage-calendars.json
+```
+
+Pick `Work` if present in `calendar list`; otherwise choose the first non-holiday, non-birthday calendar. Then run:
+
+```sh
+CALENDAR_NAME="Work"
+apple-triage --json --timeout 180 report daily --hours 24 --days 1 --calendar "$CALENDAR_NAME" > /tmp/apple-triage-daily.json
+```
+
+Validate without printing the full payload:
+
+```sh
+python3 - <<'PY'
+import json
+for name in ["doctor", "probe", "calendars", "daily"]:
+    data = json.load(open(f"/tmp/apple-triage-{name}.json"))
+    print(f"{name}: valid_json=true ok={data.get('ok')}")
+PY
+```
+
+If `doctor --probe` reports Automation or permission errors, stop and ask the user to approve Mail and Calendar access for the app running the command, then retry the probe.
+
 ## Daily triage path
 
 ```sh
@@ -41,13 +72,26 @@ apple-triage --json --timeout 180 report daily --hours 24 --days 1 --calendar Wo
 
 If output includes `skippedCalendars`, mention that those calendar sources timed out.
 
+For `report daily`, summarize these fields first:
+
+- `data.inputs.unreadMailCount`
+- `data.inputs.flaggedMailCount`
+- `data.inputs.calendarEventCount`
+- `data.inputs.skippedCalendarCount`
+- `data.mail.unread`
+- `data.mail.flagged`
+- `data.calendar.upcoming`
+- `data.calendar.skippedCalendars`
+
 Summarize:
 
-- urgent unread mail
-- flagged mail
-- meetings today
-- scheduling conflicts or tight transitions
-- likely reply/action suggestions
+- unread mail count and notable unread items
+- flagged mail count and items
+- upcoming events in local time
+- skipped calendars
+- any errors
+
+Prioritize security/account alerts, direct asks, real people, finance/legal/travel, then newsletters and promotions. Avoid dumping long mail previews unless the user asks.
 
 Do not send replies or modify Mail/Calendar unless the user explicitly asks and a separate write-capable tool exists.
 

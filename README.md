@@ -49,6 +49,12 @@ apple-triage --json doctor --probe
 
 `doctor --probe` may trigger macOS permission prompts. Grant Automation access for Terminal, iTerm, OMP, or the Codex host that runs the command. On some systems, Full Disk Access may also be required.
 
+If `doctor --probe` reports an Automation or permission error, stop and ask the user to approve Mail and Calendar access for the app running the command, then retry:
+
+```sh
+apple-triage --json doctor --probe
+```
+
 ## Commands
 
 ```sh
@@ -67,6 +73,8 @@ apple-triage --json calendar upcoming --days 7 --calendar Work --calendar Person
 ```
 
 Some Apple Calendar sources are slow through Automation. `calendar upcoming` and `report daily` use a per-calendar timeout and include skipped sources in `skippedCalendars`. Filter with `--calendar Work` or raise `--calendar-timeout 10` if a specific calendar is slow but important.
+
+When choosing a calendar for a smoke test, prefer `Work` if present. Otherwise choose the first non-holiday, non-birthday calendar from `calendar list`.
 
 Raw escape hatch for custom read-only JXA scripts:
 
@@ -102,6 +110,71 @@ Errors are always:
 ```
 
 No credentials are used or printed. Apple Mail and Calendar data is returned as local JSON only.
+
+For `report daily`, the commonly summarized fields are:
+
+- `data.inputs.unreadMailCount`
+- `data.inputs.flaggedMailCount`
+- `data.inputs.calendarEventCount`
+- `data.inputs.skippedCalendarCount`
+- `data.mail.unread`
+- `data.mail.flagged`
+- `data.calendar.upcoming`
+- `data.calendar.skippedCalendars`
+
+## Codex smoke test
+
+For an end-to-end read-only validation on a target Mac:
+
+```sh
+./install.sh
+apple-triage --json doctor > /tmp/apple-triage-doctor.json
+apple-triage --json doctor --probe > /tmp/apple-triage-probe.json
+apple-triage --json calendar list > /tmp/apple-triage-calendars.json
+```
+
+Pick a real calendar name from `/tmp/apple-triage-calendars.json`, then run:
+
+```sh
+CALENDAR_NAME="Work"
+apple-triage --json --timeout 180 report daily --hours 24 --days 1 --calendar "$CALENDAR_NAME" > /tmp/apple-triage-daily.json
+```
+
+Validate the saved outputs:
+
+```sh
+python3 - <<'PY'
+import json
+
+for name in ["doctor", "probe", "calendars", "daily"]:
+    path = f"/tmp/apple-triage-{name}.json"
+    data = json.load(open(path))
+    print(f"{name}: valid_json=true ok={data.get('ok')}")
+PY
+```
+
+Extract a compact summary without dumping long mail previews:
+
+```sh
+python3 - <<'PY'
+import json
+
+data = json.load(open("/tmp/apple-triage-daily.json"))["data"]
+print("inputs:", data["inputs"])
+print("unread:")
+for item in data["mail"]["unread"][:10]:
+    print("-", item["sender"], "|", item["subject"], "|", item["dateReceived"])
+print("flagged:")
+for item in data["mail"]["flagged"][:10]:
+    print("-", item["sender"], "|", item["subject"], "|", item["dateReceived"])
+print("events:")
+for event in data["calendar"]["upcoming"]:
+    print("-", event["calendar"], "|", event["summary"], "|", event["start"], "to", event["end"], "|", event.get("location", ""))
+print("skipped:", data["calendar"]["skippedCalendars"])
+PY
+```
+
+Summarize the result as: unread mail count and notable unread items, flagged mail count and items, upcoming events in local time, skipped calendars, and any errors. Prioritize security/account alerts, direct asks, real people, finance/legal/travel, then newsletters and promotions.
 
 ## Daily Codex triage prompt
 
